@@ -1,0 +1,186 @@
+# version: "3"
+
+services:
+  ##################################
+  #### infrastructure SERVICES ####
+  ##################################
+  # BROKER
+  broker-mqtt:
+    image: eclipse-mosquitto:1.6
+    ports:
+     - "9001:9001"
+     - "1883:1883"
+    volumes:
+      - NEBULAE_UNIVERSITY_ILE_MQTT:/mosquitto/data          
+    profiles: ["infrastructure","crud","base","all"]  
+  # MOGNO
+  store-mongo:
+    image: mongo:4
+    ports:
+    - "27017:27017"
+    environment: 
+        - storageEngine=wiredTiger
+    volumes: 
+      - NEBULAE_UNIVERSITY_ILE_MONGO:/data/db
+    profiles: ["infrastructure","crud","base","all"]  
+  # NATS-IO
+  nats-io:
+    image: nats:latest
+    ports:
+     - "4222:4222"
+    command: -js -c /etc/nats/nats-server.conf
+    volumes: 
+      - NEBULAE_UNIVERSITY_ILE_NATS:/nats/db
+      - ./infrastructure/nats-server.conf:/etc/nats/nats-server.conf
+    profiles: ["infrastructure","nats","all"]  
+  # REDIS
+  redis:
+    image: redis:7.0.11-alpine
+    ports:
+     - "6379:6379"
+    command: redis-server --save 60 1000 --loglevel warning # dump the dataset to disk every 60 seconds if at least 1000 keys changed
+    volumes: 
+      - NEBULAE_UNIVERSITY_ILE_REDIS:/data
+      - ./nats-server.conf:/etc/nats/nats-server.conf
+    profiles: ["infrastructure","all"]    
+  # KEYCLOAK
+  keycloak_db:
+    image: postgres:15
+    ports:
+      - "15432:15432"
+    environment:
+        - POSTGRES_DB=keycloak
+        - POSTGRES_USER=keycloak
+        - POSTGRES_PASSWORD=6jhVPaQWhgEMl0sXPnNmkLfS
+        - POSTGRES_ROOT_PASSWORD=qgZqZGdoe5loJ0OrZvq36LBr
+    volumes:
+      - NEBULAE_UNIVERSITY_ILE_KC:/var/lib/postgresql
+      - NEBULAE_UNIVERSITY_ILE_KC_DATA:/var/lib/postgresql/data
+    profiles: ["keycloak","infrastructure","crud","all"]    
+  keycloak:
+      image: bitnami/keycloak:22.0.1      
+      environment:
+        - KEYCLOAK_LOGLEVEL=DEBUG
+        - DB_VENDOR=postgres
+        - DB_USER=keycloak
+        - DB_DATABASE=keycloak
+        - DB_PASSWORD=6jhVPaQWhgEMl0sXPnNmkLfS
+        - DB_PORT=5432
+        - DB_ADDR=keycloak_db
+        - KEYCLOAK_ADMIN_USER=admin
+        - KEYCLOAK_ADMIN_PASSWORD=admin
+        - KEYCLOAK_STATISTICS=all
+      links:
+        - keycloak_db:postgres
+      ports:
+        - "8443:8443"
+        - "8080:8080"
+        - "9990:9990"
+      # volumes:
+      #   - ../keycloak-themes/themes:/opt/bitnami/keycloak/themes  
+      depends_on:
+      - keycloak_db
+      profiles: ["keycloak","infrastructure","crud","all"]    
+  
+  ##################################
+  #### SHELL FRONT-END & API EMI ###
+  ###################################
+  frontend-emi:
+    image: frontend-emi
+    build:
+      context: ./emi/
+      dockerfile: ./Dockerfile
+    ports:
+      - "4005:80"
+    profiles: ["frontend","emi","crud","all"]
+
+  api-emi-gateway:
+    image: api-emi-gateway
+    build:
+      context: ./emi-gateway/
+      dockerfile: ./Dockerfile
+    depends_on:
+      - broker-mqtt
+      - store-mongo
+    ports:
+      - "3005:3000"
+    env_file:
+      - backends/backend.env
+    profiles: ["api","emi","crud","all"]
+
+
+##################################
+######### EVENT-STORE-MNG ########
+##################################
+  event-store-mng-be-event-store-mng:
+    image: event-store-mng-be-event-store-mng
+    build:
+      context: ../ms-event-store-mng/backend/event-store-mng
+      dockerfile: ../../../integrated-local-environment/backends/Dockerfile
+    depends_on:
+      - broker-mqtt
+      - store-mongo
+    env_file:
+      - ../ms-event-store-mng/backend/event-store-mng/.env
+      - backends/backend.env
+    profiles: ["event-store-mng","crud","backend","all"]
+  event-store-mng-be-domain-events-reducer:
+    image: event-store-mng-be-domain-events-reducer
+    build:
+      context: ../ms-event-store-mng/backend/domain-events-reducer
+      dockerfile: ../../../integrated-local-environment/backends/Dockerfile
+    depends_on:
+      - broker-mqtt
+      - store-mongo
+    env_file:
+      - ../ms-event-store-mng/backend/domain-events-reducer/.env
+      - backends/backend.env
+    profiles: ["event-store-mng","crud","backend","all"]    
+  event-store-mng-be-domain-events-elastic-reducer:
+    image: event-store-mng-be-domain-events-elastic-reducer
+    build:
+      context: ../ms-event-store-mng/backend/domain-events-elastic-reducer
+      dockerfile: ../../../integrated-local-environment/backends/Dockerfile
+    depends_on:
+      - broker-mqtt
+      - store-mongo
+    env_file:
+      - ../ms-event-store-mng/backend/domain-events-elastic-reducer/.env
+      - backends/backend.env
+    profiles: ["event-store-mng","crud","backend","all"]
+  event-store-mng-be-domain-events-pint-reducer:
+    image: event-store-mng-be-domain-events-pint-reducer
+    build:
+      context: ../ms-event-store-mng/backend/domain-events-pint-reducer
+      dockerfile: ../../../integrated-local-environment/backends/Dockerfile
+    depends_on:
+      - broker-mqtt
+      - store-mongo
+    env_file:
+      - ../ms-event-store-mng/backend/domain-events-pint-reducer/.env
+      - backends/backend.env
+    profiles: ["event-store-mng","crud","backend","all"]    
+
+##################################
+######### ORGANIZATION MNG ######
+##################################
+  organization-mng-be-organization-mng:
+    image: organization-mng-be-organization-mng
+    build:
+      context: ../ms-organization-mng/backend/organization-mng/
+      dockerfile: ../../../integrated-local-environment/backends/Dockerfile
+    depends_on:
+      - broker-mqtt
+      - store-mongo
+    env_file:
+      - ../ms-organization-mng/backend/organization-mng/.env
+      - backends/backend.env
+    profiles: ["organization","crud","core","backend","all"]
+
+volumes: 
+  NEBULAE_UNIVERSITY_ILE_MQTT:
+  NEBULAE_UNIVERSITY_ILE_MONGO:
+  NEBULAE_UNIVERSITY_ILE_NATS:
+  NEBULAE_UNIVERSITY_ILE_REDIS:
+  NEBULAE_UNIVERSITY_ILE_KC:
+  NEBULAE_UNIVERSITY_ILE_KC_DATA:
